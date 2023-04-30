@@ -183,6 +183,9 @@ fn find_break(mut text: &str) -> Option<usize> {
         if let Some(i) = text.rfind([',', ';', ':', '"'].as_ref()) {
             return Some(i);
         }
+        if let Some(i) = text.rfind(" and ") {
+            return Some(i);
+        }
         if let Some(i) = text.rfind([' '].as_ref()) {
             return Some(i);
         }
