@@ -12,7 +12,5 @@ clap = { version = "4.2.5", features = ["derive"] }
 futures = "0.3.28"
 google-cognitive-apis = "0.2.1"
 llm-chain-openai = "0.1.0"
-minreq = { version = "2.7.0", features = ["https"] }
-percent-encoding = "2.2.0"
 rodio = "0.17.1"
 tokio = { version = "1.27.0", features = ["full"] }

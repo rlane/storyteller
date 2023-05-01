@@ -21,7 +21,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let mut chat = Chat::new(Client::new());
+    let mut chat = Chat::new(Client::new()).await;
     chat.send_and_speak(&[
         (
             Role::System,
@@ -46,10 +46,10 @@ struct Chat {
 }
 
 impl Chat {
-    fn new(client: Client) -> Self {
+    async fn new(client: Client) -> Self {
         Self {
             client,
-            speaker: Speaker::new(),
+            speaker: Speaker::new().await,
             history: Vec::new(),
         }
     }
@@ -76,17 +76,17 @@ impl Chat {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(response) => {
-                    response.choices.iter().for_each(|chat_choice| {
+                    for chat_choice in &response.choices {
                         if let Some(ref content) = chat_choice.delta.content {
                             std::io::stdout().write_all(content.as_bytes()).unwrap();
                             unspoken_text.push_str(content);
                             if let Some(i) = find_break(&unspoken_text) {
                                 let new_text = unspoken_text.split_off(i + 1);
-                                self.speaker.speak(&unspoken_text);
+                                self.speaker.speak(&unspoken_text).await;
                                 unspoken_text = new_text;
                             }
                         }
-                    });
+                    }
                     std::io::stdout().flush().unwrap();
                 }
                 Err(err) => {
@@ -95,7 +95,7 @@ impl Chat {
             }
         }
 
-        self.speaker.speak(&unspoken_text);
+        self.speaker.speak(&unspoken_text).await;
         self.speaker.wait();
         println!();
 
@@ -112,7 +112,7 @@ fn message(role: Role, content: &str) -> ChatCompletionRequestMessage {
 }
 
 fn find_break(mut text: &str) -> Option<usize> {
-    const MAX_CHARS: usize = 100;
+    const MAX_CHARS: usize = 1000;
     let force_break = text.len() > MAX_CHARS;
     if force_break {
         text = &text[0..MAX_CHARS];
@@ -123,9 +123,12 @@ fn find_break(mut text: &str) -> Option<usize> {
         }
     }
 
-    if let Some(i) = text.rfind(['.', '?', '!', '\n'].as_ref()) {
+    if let Some(i) = text.rfind('\n') {
         return Some(i);
     } else if force_break {
+        if let Some(i) = text.rfind(['.', '?', '!'].as_ref()) {
+            return Some(i);
+        }
         if let Some(i) = text.rfind([',', ';', ':', '"'].as_ref()) {
             return Some(i);
         }

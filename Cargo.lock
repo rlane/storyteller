@@ -190,7 +190,7 @@ dependencies = [
  "serde_urlencoded 0.6.1",
  "url",
  "webpki 0.21.4",
- "webpki-roots 0.19.0",
+ "webpki-roots",
  "wildmatch",
 ]
 
@@ -1381,19 +1381,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minreq"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41979ac2a5aa373c6e294b4a67fbe5e428e91a4cd0524376681f2bc6d872399b"
-dependencies = [
- "log",
- "once_cell",
- "rustls 0.20.8",
- "webpki 0.22.0",
- "webpki-roots 0.22.6",
-]
-
-[[package]]
 name = "mio"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1923,8 +1910,6 @@ dependencies = [
  "futures",
  "google-cognitive-apis",
  "llm-chain-openai",
- "minreq",
- "percent-encoding",
  "rodio",
  "tokio",
 ]
@@ -2799,15 +2784,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8eff4b7516a57307f9349c64bf34caa34b940b66fed4b2fb3136cb7386e5739"
 dependencies = [
  "webpki 0.21.4",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "0.22.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6c71e40d7d2c34a5106301fb632274ca37242cd0c9d3e64dbece371a40a2d87"
-dependencies = [
- "webpki 0.22.0",
 ]
 
 [[package]]
