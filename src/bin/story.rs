@@ -7,10 +7,8 @@ use async_openai::{
 };
 use clap::Parser;
 use futures::StreamExt;
-use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-use std::io::{Cursor, Write};
-
-const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+use rlane_llm::speaker::Speaker;
+use std::io::Write;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -39,58 +37,6 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     Ok(())
-}
-
-#[allow(dead_code)]
-struct Speaker {
-    output_stream: rodio::OutputStream,
-    output_stream_handle: rodio::OutputStreamHandle,
-    sink: rodio::Sink,
-}
-
-impl Speaker {
-    fn new() -> Self {
-        let (output_stream, output_stream_handle) = rodio::OutputStream::try_default().unwrap();
-        let sink = rodio::Sink::try_new(&output_stream_handle).unwrap();
-        Self {
-            output_stream,
-            output_stream_handle,
-            sink,
-        }
-    }
-
-    fn speak(&self, text: &str) {
-        let text = text.trim();
-        if text.is_empty() {
-            return;
-        }
-        if text.len() > 100 {
-            println!("Text was too long!");
-            return;
-        }
-        if let Err(_) = self.speak_internal(text) {
-            // Retry
-            if let Err(e) = self.speak_internal(text) {
-                println!("TTS error: {}", e);
-            }
-        }
-    }
-
-    fn speak_internal(&self, text: &str) -> anyhow::Result<()> {
-        let len = text.len();
-        let text = utf8_percent_encode(text, FRAGMENT).to_string();
-
-        let response = minreq::get(format!("https://translate.google.fr/translate_tts?ie=UTF-8&q={}&tl=en&total=1&idx=0&textlen={}&tl=en&client=tw-ob", text, len)).send()?;
-        let data: Vec<u8> = response.as_bytes().to_vec();
-        let cursor = Cursor::new(data);
-        self.sink.append(rodio::Decoder::new(cursor)?);
-
-        Ok(())
-    }
-
-    fn wait(&self) {
-        self.sink.sleep_until_end();
-    }
 }
 
 struct Chat {
