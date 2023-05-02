@@ -1,8 +1,5 @@
 use async_openai::{
-    types::{
-        ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs,
-        CreateChatCompletionRequestArgs, Role,
-    },
+    types::{ChatCompletionRequestMessageArgs, CreateChatCompletionRequestArgs, Role},
     Client,
 };
 use axum::{
@@ -43,6 +40,7 @@ async fn main() {
     };
 
     log::info!("Starting Storyteller");
+    credentials().unwrap();
 
     let router = {
         use axum::routing::{get, post};
@@ -62,7 +60,7 @@ pub async fn index_get() -> Result<String, Error> {
     Ok("Hello, World!".to_string())
 }
 
-pub async fn audio_post() -> impl IntoResponse {
+pub async fn audio_post() -> Result<impl IntoResponse, Error> {
     let (writer, reader) = tokio::io::duplex(1024);
 
     tokio::spawn(async {
@@ -71,30 +69,17 @@ pub async fn audio_post() -> impl IntoResponse {
         }
     });
 
-    let stream = ReaderStream::new(reader);
-    let body = StreamBody::new(stream);
-
-    if false {
-        return Err(error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "error".to_string(),
-        ));
-    }
-
+    let body = StreamBody::new(ReaderStream::new(reader));
     Ok((StatusCode::OK, body))
 }
 
 async fn stream_audio(audio_writer: DuplexStream) -> anyhow::Result<()> {
-    let mut chat = Chat::new(Client::new()).await;
+    let mut client = Client::new();
+    let synthesizer = Synthesizer::create(credentials()?).await.unwrap();
 
-    let credentials = fs::read_to_string(
-        env::var("GOOGLE_APPLICATION_CREDENTIALS")
-            .expect("missing GOOGLE_APPLICATION_CREDENTIALS environment variable"),
-    )
-    .unwrap();
-    let synthesizer = Synthesizer::create(credentials).await.unwrap();
-
-    chat.send_and_speak(&[
+    send_and_speak(
+        &mut client,
+        &[
         (
             Role::System,
             "You are a children's storyteller. You tell stories based on Disney fairy tales that are suitable for a four-year-old. Do not recite existing stories but make up a new one.
@@ -111,71 +96,58 @@ async fn stream_audio(audio_writer: DuplexStream) -> anyhow::Result<()> {
     Ok(())
 }
 
-struct Chat {
-    client: Client,
-    history: Vec<(Role, String)>,
-}
-
-impl Chat {
-    async fn new(client: Client) -> Self {
-        Self {
-            client,
-            history: Vec::new(),
-        }
+async fn send_and_speak(
+    client: &mut Client,
+    messages: &[(Role, String)],
+    mut synthesizer: Synthesizer,
+    mut audio_writer: DuplexStream,
+) -> Result<(), anyhow::Error> {
+    let mut send_messages = vec![];
+    for (role, content) in messages {
+        send_messages.push(
+            ChatCompletionRequestMessageArgs::default()
+                .content(content)
+                .role(role.clone())
+                .build()
+                .unwrap(),
+        )
     }
 
-    async fn send_and_speak(
-        &mut self,
-        messages: &[(Role, String)],
-        mut synthesizer: Synthesizer,
-        mut audio_writer: DuplexStream,
-    ) -> Result<(), anyhow::Error> {
-        for (role, content) in messages {
-            println!("{:?}: {}", role, content);
-            self.history.push((role.clone(), content.clone()));
-        }
+    let request = CreateChatCompletionRequestArgs::default()
+        .model("gpt-3.5-turbo")
+        .max_tokens(1024u16)
+        .messages(send_messages)
+        .build()?;
 
-        let mut send_messages = vec![];
-        for (role, content) in &self.history {
-            send_messages.push(message(role.clone(), content));
-        }
-
-        let request = CreateChatCompletionRequestArgs::default()
-            .model("gpt-3.5-turbo")
-            .max_tokens(1024u16)
-            .messages(send_messages)
-            .build()?;
-
-        let mut unspoken_text = String::new();
-        let mut stream = self.client.chat().create_stream(request).await?;
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(response) => {
-                    for chat_choice in &response.choices {
-                        if let Some(ref content) = chat_choice.delta.content {
-                            unspoken_text.push_str(content);
-                            if let Some(i) = find_break(&unspoken_text) {
-                                let new_text = unspoken_text.split_off(i + 1);
-                                audio_writer
-                                    .write_all(&synthesize(&mut synthesizer, &unspoken_text).await)
-                                    .await?;
-                                unspoken_text = new_text;
-                            }
+    let mut unspoken_text = String::new();
+    let mut stream = client.chat().create_stream(request).await?;
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(response) => {
+                for chat_choice in &response.choices {
+                    if let Some(ref content) = chat_choice.delta.content {
+                        unspoken_text.push_str(content);
+                        if let Some(i) = find_break(&unspoken_text) {
+                            let new_text = unspoken_text.split_off(i + 1);
+                            audio_writer
+                                .write_all(&synthesize(&mut synthesizer, &unspoken_text).await)
+                                .await?;
+                            unspoken_text = new_text;
                         }
                     }
                 }
-                Err(err) => {
-                    return Err(err.into());
-                }
+            }
+            Err(err) => {
+                return Err(err.into());
             }
         }
-
-        audio_writer
-            .write_all(&synthesize(&mut synthesizer, &unspoken_text).await)
-            .await?;
-
-        Ok(())
     }
+
+    audio_writer
+        .write_all(&synthesize(&mut synthesizer, &unspoken_text).await)
+        .await?;
+
+    Ok(())
 }
 
 async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> Vec<u8> {
@@ -203,14 +175,6 @@ async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> Vec<u8> {
 
     let data: Vec<u8> = response.audio_content;
     data
-}
-
-fn message(role: Role, content: &str) -> ChatCompletionRequestMessage {
-    ChatCompletionRequestMessageArgs::default()
-        .content(content)
-        .role(role)
-        .build()
-        .unwrap()
 }
 
 fn find_break(mut text: &str) -> Option<usize> {
@@ -273,4 +237,9 @@ where
             err: err.into(),
         }
     }
+}
+
+fn credentials() -> Result<String, anyhow::Error> {
+    let path = env::var("GOOGLE_APPLICATION_CREDENTIALS")?;
+    Ok(fs::read_to_string(path)?)
 }
