@@ -126,6 +126,8 @@ async fn send_and_speak(
         .messages(send_messages)
         .build()?;
 
+    let mut wav_streamer = WavStreamer::new();
+
     let mut unspoken_text = String::new();
     let mut stream = client.chat().create_stream(request).await?;
     while let Some(result) = stream.next().await {
@@ -137,7 +139,10 @@ async fn send_and_speak(
                         if let Some(i) = find_break(&unspoken_text) {
                             let new_text = unspoken_text.split_off(i + 1);
                             audio_writer
-                                .write_all(&synthesize(&mut synthesizer, &unspoken_text).await)
+                                .write_all(
+                                    &wav_streamer
+                                        .add(&synthesize(&mut synthesizer, &unspoken_text).await),
+                                )
                                 .await?;
                             unspoken_text = new_text;
                         }
@@ -151,7 +156,7 @@ async fn send_and_speak(
     }
 
     audio_writer
-        .write_all(&synthesize(&mut synthesizer, &unspoken_text).await)
+        .write_all(&wav_streamer.add(&synthesize(&mut synthesizer, &unspoken_text).await))
         .await?;
 
     Ok(())
@@ -182,6 +187,34 @@ async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> Vec<u8> {
 
     let data: Vec<u8> = response.audio_content;
     data
+}
+
+struct WavStreamer {
+    first: bool,
+}
+
+impl WavStreamer {
+    fn new() -> Self {
+        Self { first: true }
+    }
+
+    fn add(&mut self, data: &[u8]) -> Vec<u8> {
+        let first = self.first;
+        self.first = false;
+        let mut result = Vec::new();
+        if first {
+            result.extend_from_slice(&data[..]);
+            for i in 4..8 {
+                result[i] = 0xff;
+            }
+            for i in 40..44 {
+                result[i] = 0xff;
+            }
+        } else {
+            result.extend_from_slice(&data[44..]);
+        }
+        result
+    }
 }
 
 fn find_break(mut text: &str) -> Option<usize> {
