@@ -5,20 +5,21 @@ use async_openai::{
 use axum::{
     body::StreamBody,
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     Router,
 };
 use futures::StreamExt;
-use google_cognitive_apis::api::grpc::google::cloud::texttospeech::v1::SsmlVoiceGender;
 use google_cognitive_apis::api::grpc::google::cloud::texttospeech::v1::{
-    synthesis_input::InputSource, AudioConfig, AudioEncoding, SynthesisInput,
+    synthesis_input::InputSource, AudioConfig, AudioEncoding, SsmlVoiceGender, SynthesisInput,
     SynthesizeSpeechRequest, VoiceSelectionParams,
 };
 use google_cognitive_apis::texttospeech::synthesizer::Synthesizer;
+use http::Method;
 use std::env;
 use std::fs;
 use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio_util::io::ReaderStream;
+use tower_http::cors::{Any, CorsLayer};
 
 const VOICE: &str = "en-US-Studio-O";
 
@@ -42,11 +43,17 @@ async fn main() {
     log::info!("Starting Storyteller");
     credentials().unwrap();
 
+    let cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_origin(Any)
+        .allow_headers(Any);
+
     let router = {
-        use axum::routing::{get, post};
+        use axum::routing::get;
         Router::new()
             .route("/", get(index_get))
-            .route("/audio", post(audio_post))
+            .route("/audio", get(audio_get))
+            .layer(cors)
             .layer(tower_http::trace::TraceLayer::new_for_http())
     };
 
@@ -56,11 +63,11 @@ async fn main() {
         .unwrap();
 }
 
-pub async fn index_get() -> Result<String, Error> {
-    Ok("Hello, World!".to_string())
+async fn index_get() -> Html<&'static str> {
+    Html(include_str!("../../www/index.html"))
 }
 
-pub async fn audio_post() -> Result<impl IntoResponse, Error> {
+pub async fn audio_get() -> Result<impl IntoResponse, Error> {
     let (writer, reader) = tokio::io::duplex(1024);
 
     tokio::spawn(async {
