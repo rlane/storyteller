@@ -7,7 +7,7 @@ use async_openai::{
 };
 use clap::Parser;
 use futures::StreamExt;
-use rlane_llm::speaker::Speaker;
+use rlane_storyteller::speaker::Speaker;
 use std::io::Write;
 
 #[derive(Parser, Debug)]
