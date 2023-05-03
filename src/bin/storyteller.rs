@@ -4,6 +4,7 @@ use async_openai::{
 };
 use axum::{
     body::StreamBody,
+    extract::Query,
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     Router,
@@ -15,6 +16,7 @@ use google_cognitive_apis::api::grpc::google::cloud::texttospeech::v1::{
 };
 use google_cognitive_apis::texttospeech::synthesizer::Synthesizer;
 use http::Method;
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use tokio::io::{AsyncWriteExt, DuplexStream};
@@ -67,11 +69,17 @@ async fn index_get() -> Html<&'static str> {
     Html(include_str!("../../www/index.html"))
 }
 
-pub async fn audio_get() -> Result<impl IntoResponse, Error> {
-    let (writer, reader) = tokio::io::duplex(1024);
+#[derive(Deserialize)]
+struct AudioQuery {
+    prompt: String,
+}
 
-    tokio::spawn(async {
-        if let Err(e) = stream_audio(writer).await {
+async fn audio_get(query: Query<AudioQuery>) -> Result<impl IntoResponse, Error> {
+    let (writer, reader) = tokio::io::duplex(1024);
+    let prompt = query.prompt.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = stream_audio(prompt, writer).await {
             log::error!("stream_audio error: {}", e);
         }
     });
@@ -80,7 +88,7 @@ pub async fn audio_get() -> Result<impl IntoResponse, Error> {
     Ok((StatusCode::OK, body))
 }
 
-async fn stream_audio(audio_writer: DuplexStream) -> anyhow::Result<()> {
+async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Result<()> {
     let mut client = Client::new();
     let synthesizer = Synthesizer::create(credentials()?).await.unwrap();
 
@@ -95,7 +103,7 @@ async fn stream_audio(audio_writer: DuplexStream) -> anyhow::Result<()> {
         ),
         (
             Role::User,
-            "Tell me a story.".to_string()
+                prompt
         ),
     ], synthesizer, audio_writer)
     .await?;

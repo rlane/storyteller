@@ -9,28 +9,69 @@ body {
 div.main {
   width: min(50em, 90%);
   margin: auto;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
-h1 {
-  color: #ffffff;
+input#prompt {
+  display: block;
+  width: 100%;
   font-size: xxx-large;
-  text-align: center;
+  color: #444444;
+}
+
+button#start {
+  display: block;
+  width: 30%;
+  margin: auto;
+  font-size: xxx-large;
+  color: #444444;
 }
 
 audio {
   width: 100%;
+  visibility: hidden;
 }
 </style>
 </head>
 <body>
 
 <div class="main">
-<h1>Storyteller</h1>
 
-<audio controls preload="none">
-  <source src="/audio" type="audio/wav" />
+<form id="form">
+<input type="text" id="prompt" value="Tell me a story" />
+<br />
+<button type="submit" id="start">Go</button>
+</form>
+<br />
+
+<audio id="audio" controls preload="none">
+  <source id="audio_source" type="audio/wav" />
 </audio>
 </div>
+
+<script>
+async function start(event) {
+  event.preventDefault();
+  var prompt = document.getElementById("prompt").value;
+  var audio = document.getElementById("audio");
+  var audio_source = document.getElementById("audio_source");
+  var url = "/audio?prompt=" + encodeURIComponent(prompt);
+  audio_source.src = url;
+  try {
+    audio.load();
+    audio.style.visibility = "visible";
+    await audio.play();
+  } catch (e) {
+    console.log(e);
+  }
+}
+
+const form = document.getElementById("form");
+form.addEventListener("submit", start);
+</script>
 
 </body>
 </html>
