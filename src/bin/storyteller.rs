@@ -138,13 +138,16 @@ async fn send_and_speak(
 
     let mut unspoken_text = String::new();
     let mut stream = client.chat().create_stream(request).await?;
+    let mut seen_break = false;
+
     while let Some(result) = stream.next().await {
         match result {
             Ok(response) => {
                 for chat_choice in &response.choices {
                     if let Some(ref content) = chat_choice.delta.content {
                         unspoken_text.push_str(content);
-                        if let Some(i) = find_break(&unspoken_text) {
+                        if let Some(i) = find_break(&unspoken_text, !seen_break) {
+                            seen_break = true;
                             let new_text = unspoken_text.split_off(i + 1);
                             audio_writer
                                 .write_all(
@@ -225,7 +228,7 @@ impl WavStreamer {
     }
 }
 
-fn find_break(mut text: &str) -> Option<usize> {
+fn find_break(mut text: &str, first: bool) -> Option<usize> {
     const MAX_CHARS: usize = 1000;
     let force_break = text.len() > MAX_CHARS;
     if force_break {
@@ -239,6 +242,10 @@ fn find_break(mut text: &str) -> Option<usize> {
 
     if let Some(i) = text.rfind('\n') {
         return Some(i);
+    } else if first {
+        if let Some(i) = text.rfind(['.', '?', '!', ',', ';'].as_ref()) {
+            return Some(i);
+        }
     } else if force_break {
         if let Some(i) = text.rfind(['.', '?', '!'].as_ref()) {
             return Some(i);
