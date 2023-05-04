@@ -20,6 +20,7 @@ use serde::Deserialize;
 use std::env;
 use std::fs;
 use tokio::io::{AsyncWriteExt, DuplexStream};
+use tokio::sync::mpsc;
 use tokio_util::io::ReaderStream;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -92,7 +93,15 @@ async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Res
     let mut client = Client::new();
     let synthesizer = Synthesizer::create(credentials()?).await.unwrap();
 
-    send_and_speak(
+    let (token_tx, token_rx) = mpsc::channel(100);
+
+    tokio::spawn(async move {
+        if let Err(e) = synthesize_task(synthesizer, token_rx, audio_writer).await {
+            log::error!("synthesize_task error: {}", e);
+        }
+    });
+
+    query_gpt(
         &mut client,
         &[
         (
@@ -105,17 +114,16 @@ async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Res
             Role::User,
                 prompt
         ),
-    ], synthesizer, audio_writer)
+    ], token_tx)
     .await?;
 
     Ok(())
 }
 
-async fn send_and_speak(
+async fn query_gpt(
     client: &mut Client,
     messages: &[(Role, String)],
-    mut synthesizer: Synthesizer,
-    mut audio_writer: DuplexStream,
+    token_tx: mpsc::Sender<String>,
 ) -> Result<(), anyhow::Error> {
     let mut send_messages = vec![];
     for (role, content) in messages {
@@ -134,35 +142,43 @@ async fn send_and_speak(
         .messages(send_messages)
         .build()?;
 
-    let mut wav_streamer = WavStreamer::new();
-
-    let mut unspoken_text = String::new();
     let mut stream = client.chat().create_stream(request).await?;
-    let mut seen_break = false;
 
     while let Some(result) = stream.next().await {
         match result {
             Ok(response) => {
                 for chat_choice in &response.choices {
                     if let Some(ref content) = chat_choice.delta.content {
-                        unspoken_text.push_str(content);
-                        if let Some(i) = find_break(&unspoken_text, !seen_break) {
-                            seen_break = true;
-                            let new_text = unspoken_text.split_off(i + 1);
-                            audio_writer
-                                .write_all(
-                                    &wav_streamer
-                                        .add(&synthesize(&mut synthesizer, &unspoken_text).await),
-                                )
-                                .await?;
-                            unspoken_text = new_text;
-                        }
+                        log::info!("GPT: {:?}", content);
+                        token_tx.send(content.clone()).await?;
                     }
                 }
             }
             Err(err) => {
                 return Err(err.into());
             }
+        }
+    }
+
+    Ok(())
+}
+
+async fn synthesize_task(
+    mut synthesizer: Synthesizer,
+    mut token_rx: mpsc::Receiver<String>,
+    mut audio_writer: DuplexStream,
+) -> anyhow::Result<()> {
+    let mut wav_streamer = WavStreamer::new();
+    let mut unspoken_text = String::new();
+
+    while let Some(token) = token_rx.recv().await {
+        unspoken_text.push_str(&token);
+        if let Some(i) = find_break(&unspoken_text) {
+            let new_text = unspoken_text.split_off(i + 1);
+            audio_writer
+                .write_all(&wav_streamer.add(&synthesize(&mut synthesizer, &unspoken_text).await))
+                .await?;
+            unspoken_text = new_text;
         }
     }
 
@@ -174,6 +190,8 @@ async fn send_and_speak(
 }
 
 async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> Vec<u8> {
+    log::info!("Synthesizing {:?}", &text);
+    let start_time = std::time::Instant::now();
     let response = synthesizer
         .synthesize_speech(SynthesizeSpeechRequest {
             input: Some(SynthesisInput {
@@ -197,6 +215,12 @@ async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> Vec<u8> {
         .unwrap();
 
     let data: Vec<u8> = response.audio_content;
+    log::info!(
+        "synthesize_speech took {}ms, {} bytes input, {} bytes output",
+        start_time.elapsed().as_millis(),
+        text.len(),
+        data.len()
+    );
     data
 }
 
@@ -228,40 +252,8 @@ impl WavStreamer {
     }
 }
 
-fn find_break(mut text: &str, first: bool) -> Option<usize> {
-    const MAX_CHARS: usize = 1000;
-    let force_break = text.len() > MAX_CHARS;
-    if force_break {
-        text = &text[0..MAX_CHARS];
-        if let Some(i) = text.rfind(' ') {
-            text = &text[0..i];
-        } else {
-            panic!("Failed to break text");
-        }
-    }
-
-    if let Some(i) = text.rfind('\n') {
-        return Some(i);
-    } else if first {
-        if let Some(i) = text.rfind(['.', '?', '!', ',', ';'].as_ref()) {
-            return Some(i);
-        }
-    } else if force_break {
-        if let Some(i) = text.rfind(['.', '?', '!'].as_ref()) {
-            return Some(i);
-        }
-        if let Some(i) = text.rfind([',', ';', ':', '"'].as_ref()) {
-            return Some(i);
-        }
-        if let Some(i) = text.rfind(" and ") {
-            return Some(i);
-        }
-        if let Some(i) = text.rfind([' '].as_ref()) {
-            return Some(i);
-        }
-    }
-
-    None
+fn find_break(text: &str) -> Option<usize> {
+    text.find(['.', '?', '!', '\n'].as_ref())
 }
 
 pub fn error(status_code: StatusCode, msg: String) -> Error {
