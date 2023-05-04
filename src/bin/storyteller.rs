@@ -54,7 +54,7 @@ async fn main() {
     let router = {
         use axum::routing::get;
         Router::new()
-            .route("/", get(index_get))
+            .route("/secret", get(index_get))
             .route("/audio", get(audio_get))
             .layer(cors)
             .layer(tower_http::trace::TraceLayer::new_for_http())
