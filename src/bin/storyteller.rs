@@ -101,20 +101,25 @@ async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Res
         }
     });
 
+    log::info!("Prompt: {:?}", prompt);
+
     query_gpt(
         &mut client,
         &[
-        (
-            Role::System,
-            "You are a children's storyteller. You tell stories based on Disney fairy tales that are suitable for a four-year-old. Do not recite existing stories but make up a new one.
-            The story should include a strong female protagonist."
-                .to_string(),
-        ),
-        (
-            Role::User,
-                prompt
-        ),
-    ], token_tx)
+            (
+                Role::System,
+                "\
+You are a children's storyteller.
+You tell stories based on Disney fairy tales that are suitable for a six-year-old.
+Do not recite existing stories but make up a new one.
+Any girls in the story should be intelligent and strong.
+Do not summarize. Always finish with \"The End\"."
+                    .to_string(),
+            ),
+            (Role::User, prompt),
+        ],
+        token_tx,
+    )
     .await?;
 
     Ok(())
@@ -143,15 +148,19 @@ async fn query_gpt(
         .build()?;
 
     let mut stream = client.chat().create_stream(request).await?;
+    let mut tokens = vec![];
 
     while let Some(result) = stream.next().await {
         let response = result?;
         for chat_choice in &response.choices {
             if let Some(ref content) = chat_choice.delta.content {
+                tokens.push(content.clone());
                 token_tx.send(content.clone()).await?;
             }
         }
     }
+
+    log::info!("Response ({} tokens): {:?}", tokens.len(), tokens.join(""));
 
     Ok(())
 }
