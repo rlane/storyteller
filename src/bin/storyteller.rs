@@ -145,17 +145,10 @@ async fn query_gpt(
     let mut stream = client.chat().create_stream(request).await?;
 
     while let Some(result) = stream.next().await {
-        match result {
-            Ok(response) => {
-                for chat_choice in &response.choices {
-                    if let Some(ref content) = chat_choice.delta.content {
-                        log::info!("GPT: {:?}", content);
-                        token_tx.send(content.clone()).await?;
-                    }
-                }
-            }
-            Err(err) => {
-                return Err(err.into());
+        let response = result?;
+        for chat_choice in &response.choices {
+            if let Some(ref content) = chat_choice.delta.content {
+                token_tx.send(content.clone()).await?;
             }
         }
     }
@@ -175,22 +168,27 @@ async fn synthesize_task(
         unspoken_text.push_str(&token);
         if let Some(i) = find_break(&unspoken_text) {
             let new_text = unspoken_text.split_off(i + 1);
-            audio_writer
-                .write_all(&wav_streamer.add(&synthesize(&mut synthesizer, &unspoken_text).await))
-                .await?;
+            if let Some(data) = synthesize(&mut synthesizer, &unspoken_text).await? {
+                audio_writer.write_all(&wav_streamer.add(&data)).await?;
+            }
             unspoken_text = new_text;
         }
     }
 
-    audio_writer
-        .write_all(&wav_streamer.add(&synthesize(&mut synthesizer, &unspoken_text).await))
-        .await?;
+    if let Some(data) = synthesize(&mut synthesizer, &unspoken_text).await? {
+        audio_writer.write_all(&wav_streamer.add(&data)).await?;
+    }
 
     Ok(())
 }
 
-async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> Vec<u8> {
-    log::info!("Synthesizing {:?}", &text);
+async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> anyhow::Result<Option<Vec<u8>>> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+
+    log::trace!("Synthesizing {:?}", &text);
     let start_time = std::time::Instant::now();
     let response = synthesizer
         .synthesize_speech(SynthesizeSpeechRequest {
@@ -212,16 +210,16 @@ async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> Vec<u8> {
             }),
         })
         .await
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("synthesize_speech error: {:?}", e))?;
 
     let data: Vec<u8> = response.audio_content;
-    log::info!(
+    log::trace!(
         "synthesize_speech took {}ms, {} bytes input, {} bytes output",
         start_time.elapsed().as_millis(),
         text.len(),
         data.len()
     );
-    data
+    Ok(Some(data))
 }
 
 struct WavStreamer {
