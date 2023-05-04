@@ -86,6 +86,7 @@ async function start(event) {
   try {
     document.getElementById("form").classList.add("shake");
     start_time = new Date();
+    button.disabled = true;
     audio.load();
     await audio.play();
   } catch (e) {
@@ -99,6 +100,7 @@ form.addEventListener("submit", start);
 var audio = document.getElementById("audio");
 audio.addEventListener("canplaythrough", function() {
   var button = document.getElementById("start");
+  button.disabled = false;
   document.getElementById("form").classList.remove("shake");
   audio.style.visibility = "visible";
   console.log("Audio loaded in " + (new Date() - start_time) + "ms");
