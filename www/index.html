@@ -72,6 +72,8 @@ audio {
 </div>
 
 <script>
+var start_time = null;
+
 async function start(event) {
   event.preventDefault();
   var prompt = document.getElementById("prompt").value;
@@ -83,6 +85,7 @@ async function start(event) {
   audio.style.visibility = "hidden";
   try {
     document.getElementById("form").classList.add("shake");
+    start_time = new Date();
     audio.load();
     await audio.play();
   } catch (e) {
@@ -98,6 +101,7 @@ audio.addEventListener("canplaythrough", function() {
   var button = document.getElementById("start");
   document.getElementById("form").classList.remove("shake");
   audio.style.visibility = "visible";
+  console.log("Audio loaded in " + (new Date() - start_time) + "ms");
 });
 </script>
 
