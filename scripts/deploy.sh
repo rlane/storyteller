@@ -1,6 +1,6 @@
 #!/bin/bash -eux
 REGION=us-west1
-PROJECT_ID=storyteller-20230501-184513
+PROJECT_ID=${PROJECT_ID:?}
 IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/services/storyteller
 scripts/build-docker.sh
 docker tag storyteller $IMAGE
