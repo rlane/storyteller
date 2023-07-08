@@ -10,6 +10,7 @@ anyhow = "1.0.70"
 async-openai = "0.10.1"
 axum = { version = "0.6.18", features = ["headers"] }
 clap = { version = "4.2.5", features = ["derive"] }
+env_logger = "0.10.0"
 futures = "0.3.28"
 google-cognitive-apis = "0.2.1"
 http = "0.2.9"

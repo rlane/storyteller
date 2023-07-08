@@ -21,6 +21,8 @@ async fn print_tokens(mut token_rx: mpsc::Receiver<String>) -> anyhow::Result<()
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let args = Args::parse();
 
     let client = Client::new();
