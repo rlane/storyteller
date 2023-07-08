@@ -1,4 +1,5 @@
 use async_openai::{
+    config::OpenAIConfig,
     types::{ChatCompletionRequestMessageArgs, CreateChatCompletionRequestArgs, Role},
     Client,
 };
@@ -37,7 +38,7 @@ pub async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow:
 }
 
 pub async fn query_story(
-    mut client: Client,
+    mut client: Client<OpenAIConfig>,
     prompt: String,
     token_tx: mpsc::Sender<String>,
 ) -> Result<(), anyhow::Error> {
@@ -64,7 +65,7 @@ Do not summarize. Always finish with \"The End\"."
 }
 
 async fn query_gpt(
-    client: &mut Client,
+    client: &mut Client<OpenAIConfig>,
     messages: &[(Role, String)],
     token_tx: mpsc::Sender<String>,
 ) -> Result<(), anyhow::Error> {
