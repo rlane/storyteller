@@ -14,9 +14,11 @@ use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio::sync::mpsc;
 
 const VOICE: &str = "en-US-Studio-O";
+const MODEL: &str = "gpt-3.5-turbo";
+const MAX_TOKENS: u16 = 1024u16;
 
 pub async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Result<()> {
-    let mut client = Client::new();
+    let client = Client::new();
     let synthesizer = Synthesizer::create(credentials()?).await.unwrap();
 
     let (token_tx, token_rx) = mpsc::channel(100);
@@ -29,6 +31,16 @@ pub async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow:
 
     log::info!("Prompt: {:?}", prompt);
 
+    query_story(client, prompt, token_tx).await?;
+
+    Ok(())
+}
+
+pub async fn query_story(
+    mut client: Client,
+    prompt: String,
+    token_tx: mpsc::Sender<String>,
+) -> Result<(), anyhow::Error> {
     query_gpt(
         &mut client,
         &[
@@ -68,8 +80,8 @@ async fn query_gpt(
     }
 
     let request = CreateChatCompletionRequestArgs::default()
-        .model("gpt-3.5-turbo")
-        .max_tokens(1024u16)
+        .model(MODEL)
+        .max_tokens(MAX_TOKENS)
         .messages(send_messages)
         .build()?;
 
