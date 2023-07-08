@@ -1632,25 +1632,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rlane-storyteller"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-openai",
- "axum",
- "clap",
- "futures",
- "google-cognitive-apis",
- "http",
- "log",
- "serde",
- "stackdriver_logger",
- "tokio",
- "tokio-util",
- "tower-http",
-]
-
-[[package]]
 name = "rustix"
 version = "0.37.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1924,6 +1905,25 @@ dependencies = [
  "pretty_env_logger",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "storyteller"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-openai",
+ "axum",
+ "clap",
+ "futures",
+ "google-cognitive-apis",
+ "http",
+ "log",
+ "serde",
+ "stackdriver_logger",
+ "tokio",
+ "tokio-util",
+ "tower-http",
 ]
 
 [[package]]

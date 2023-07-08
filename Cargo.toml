@@ -1,5 +1,5 @@
 [package]
-name = "rlane-storyteller"
+name = "storyteller"
 version = "0.1.0"
 edition = "2021"
 
