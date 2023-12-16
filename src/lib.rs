@@ -17,7 +17,7 @@ use std::io::Cursor;
 use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio::sync::mpsc;
 
-const MODEL: &str = "gpt-3.5-turbo";
+const MODEL: &str = "gpt-4";
 const MAX_TOKENS: u16 = 1024u16;
 
 pub async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Result<()> {
