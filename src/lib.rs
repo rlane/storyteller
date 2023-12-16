@@ -6,32 +6,33 @@ use async_openai::{
     },
     Client,
 };
-use futures::StreamExt;
-use google_cognitive_apis::api::grpc::google::cloud::texttospeech::v1::{
-    synthesis_input::InputSource, AudioConfig, AudioEncoding, SsmlVoiceGender, SynthesisInput,
-    SynthesizeSpeechRequest, VoiceSelectionParams,
+use async_openai::{
+    types::{CreateSpeechRequestArgs, SpeechModel, SpeechResponseFormat, Voice},
+    Audio,
 };
-use google_cognitive_apis::texttospeech::synthesizer::Synthesizer;
+use futures::StreamExt;
 use std::env;
 use std::fs;
+use std::io::Cursor;
 use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio::sync::mpsc;
 
-const VOICE: &str = "en-US-Studio-O";
 const MODEL: &str = "gpt-3.5-turbo";
 const MAX_TOKENS: u16 = 1024u16;
 
 pub async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Result<()> {
     let client = Client::new();
-    let synthesizer = Synthesizer::create(credentials()?).await.unwrap();
 
     let (token_tx, token_rx) = mpsc::channel(100);
 
-    tokio::spawn(async move {
-        if let Err(e) = synthesize_task(synthesizer, token_rx, audio_writer).await {
-            log::error!("synthesize_task error: {}", e);
-        }
-    });
+    {
+        let client = client.clone();
+        tokio::spawn(async move {
+            if let Err(e) = synthesize_task(client, token_rx, audio_writer).await {
+                log::error!("synthesize_task error: {}", e);
+            }
+        });
+    }
 
     log::info!("Prompt: {:?}", prompt);
 
@@ -113,7 +114,7 @@ async fn query_gpt(
 }
 
 async fn synthesize_task(
-    mut synthesizer: Synthesizer,
+    client: Client<OpenAIConfig>,
     mut token_rx: mpsc::Receiver<String>,
     mut audio_writer: DuplexStream,
 ) -> anyhow::Result<()> {
@@ -124,21 +125,21 @@ async fn synthesize_task(
         unspoken_text.push_str(&token);
         if let Some(i) = find_break(&unspoken_text) {
             let new_text = unspoken_text.split_off(i + 1);
-            if let Some(data) = synthesize(&mut synthesizer, &unspoken_text).await? {
+            if let Some(data) = synthesize(&client, &unspoken_text).await? {
                 audio_writer.write_all(&wav_streamer.add(&data)).await?;
             }
             unspoken_text = new_text;
         }
     }
 
-    if let Some(data) = synthesize(&mut synthesizer, &unspoken_text).await? {
+    if let Some(data) = synthesize(&client, &unspoken_text).await? {
         audio_writer.write_all(&wav_streamer.add(&data)).await?;
     }
 
     Ok(())
 }
 
-async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> anyhow::Result<Option<Vec<u8>>> {
+async fn synthesize(client: &Client<OpenAIConfig>, text: &str) -> anyhow::Result<Option<Vec<u8>>> {
     let text = text.trim();
     if text.is_empty() {
         return Ok(None);
@@ -146,36 +147,54 @@ async fn synthesize(synthesizer: &mut Synthesizer, text: &str) -> anyhow::Result
 
     log::trace!("Synthesizing {:?}", &text);
     let start_time = std::time::Instant::now();
-    let response = synthesizer
-        .synthesize_speech(SynthesizeSpeechRequest {
-            input: Some(SynthesisInput {
-                input_source: Some(InputSource::Text(text.to_owned())),
-            }),
-            voice: Some(VoiceSelectionParams {
-                language_code: "en-us".to_string(),
-                name: VOICE.to_owned(),
-                ssml_gender: SsmlVoiceGender::Female as i32,
-            }),
-            audio_config: Some(AudioConfig {
-                audio_encoding: AudioEncoding::Linear16 as i32,
-                speaking_rate: 1f64,
-                pitch: 0f64,
-                volume_gain_db: 0f64,
-                sample_rate_hertz: 24000,
-                effects_profile_id: vec![],
-            }),
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("synthesize_speech error: {:?}", e))?;
 
-    let data: Vec<u8> = response.audio_content;
+    let speech_model = SpeechModel::Tts1;
+    let voice = Voice::Nova;
+    let request = CreateSpeechRequestArgs::default()
+        .model(speech_model)
+        .voice(voice)
+        .input(text)
+        .response_format(SpeechResponseFormat::Flac)
+        .build()?;
+
+    let audio = Audio::new(client);
+    let response = audio.speech(request).await?;
+
+    let flac_data: Vec<u8> = response.bytes.to_vec();
+    let wav_data = decode_flac(&flac_data)?;
+
     log::trace!(
         "synthesize_speech took {}ms, {} bytes input, {} bytes output",
         start_time.elapsed().as_millis(),
         text.len(),
-        data.len()
+        wav_data.len()
     );
-    Ok(Some(data))
+    Ok(Some(wav_data))
+}
+
+fn decode_flac(flac_data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let cursor = Cursor::new(&flac_data);
+    let mut reader = claxon::FlacReader::new(cursor)?;
+
+    let spec = hound::WavSpec {
+        channels: reader.streaminfo().channels as u16,
+        sample_rate: reader.streaminfo().sample_rate,
+        bits_per_sample: reader.streaminfo().bits_per_sample as u16,
+        sample_format: hound::SampleFormat::Int,
+    };
+
+    let mut wav_data = Vec::new();
+    {
+        let cursor = Cursor::new(&mut wav_data);
+        let mut wav_writer = hound::WavWriter::new(cursor, spec)?;
+
+        for opt_sample in reader.samples() {
+            let sample = opt_sample?;
+            wav_writer.write_sample(sample)?;
+        }
+    }
+
+    Ok(wav_data)
 }
 
 struct WavStreamer {

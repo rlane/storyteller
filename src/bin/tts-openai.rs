@@ -4,6 +4,7 @@ use async_openai::{
     Audio, Client,
 };
 use clap::Parser;
+use std::io::Cursor;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -55,12 +56,39 @@ async fn synthesize(
     let audio = Audio::new(&client);
     let response = audio.speech(request).await?;
 
-    let data: Vec<u8> = response.bytes.to_vec();
+    let flac_data: Vec<u8> = response.bytes.to_vec();
+    let wav_data = decode_flac(&flac_data)?;
+
     log::trace!(
         "synthesize_speech took {}ms, {} bytes input, {} bytes output",
         start_time.elapsed().as_millis(),
         text.len(),
-        data.len()
+        wav_data.len()
     );
-    Ok(Some(data))
+    Ok(Some(wav_data))
+}
+
+fn decode_flac(flac_data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let cursor = Cursor::new(&flac_data);
+    let mut reader = claxon::FlacReader::new(cursor)?;
+
+    let spec = hound::WavSpec {
+        channels: reader.streaminfo().channels as u16,
+        sample_rate: reader.streaminfo().sample_rate,
+        bits_per_sample: reader.streaminfo().bits_per_sample as u16,
+        sample_format: hound::SampleFormat::Int,
+    };
+
+    let mut wav_data = Vec::new();
+    {
+        let cursor = Cursor::new(&mut wav_data);
+        let mut wav_writer = hound::WavWriter::new(cursor, spec)?;
+
+        for opt_sample in reader.samples() {
+            let sample = opt_sample?;
+            wav_writer.write_sample(sample)?;
+        }
+    }
+
+    Ok(wav_data)
 }
