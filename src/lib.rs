@@ -1,6 +1,9 @@
 use async_openai::{
     config::OpenAIConfig,
-    types::{ChatCompletionRequestMessageArgs, CreateChatCompletionRequestArgs, Role},
+    types::{
+        ChatCompletionRequestMessage, ChatCompletionRequestUserMessageArgs,
+        CreateChatCompletionRequestArgs, Role,
+    },
     Client,
 };
 use futures::StreamExt;
@@ -71,19 +74,19 @@ async fn query_gpt(
 ) -> Result<(), anyhow::Error> {
     let mut send_messages = vec![];
     for (role, content) in messages {
-        send_messages.push(
-            ChatCompletionRequestMessageArgs::default()
-                .content(content)
+        send_messages.push(ChatCompletionRequestMessage::User(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(content.as_str())
                 .role(role.clone())
                 .build()
                 .unwrap(),
-        )
+        ))
     }
 
     let request = CreateChatCompletionRequestArgs::default()
         .model(MODEL)
         .max_tokens(MAX_TOKENS)
-        .messages(send_messages)
+        .messages(send_messages.as_slice())
         .build()?;
 
     let mut stream = client.chat().create_stream(request).await?;
