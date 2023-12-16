@@ -29,7 +29,7 @@ gcloud iam service-accounts keys create .key/google-credentials.json --iam-accou
 gcloud secrets create google-credentials --data-file .key/google-credentials.json
 rm -rf .key
 
-echo $OPENAI_API_KEY | gcloud secrets create openai_api_key --data-file=-
+echo -n $OPENAI_API_KEY | gcloud secrets create openai_api_key --data-file=-
 
 while ! gcloud --project $PROJECT_ID artifacts repositories create services --repository-format=docker --location=$REGION; do
   sleep 10
