@@ -102,7 +102,12 @@ async fn query_gpt(
         }
     }
 
-    log::info!("Response ({} tokens): {:?}", tokens.len(), tokens.join(""));
+    log::info!(
+        "Response ({} tokens, {} characters): {:?}",
+        tokens.len(),
+        tokens.join("").len(),
+        tokens.join("")
+    );
 
     Ok(())
 }
