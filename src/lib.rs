@@ -224,5 +224,5 @@ impl WavStreamer {
 }
 
 fn find_break(text: &str) -> Option<usize> {
-    text.find(['.', '?', '!', '\n'].as_ref())
+    text.find('\n')
 }
