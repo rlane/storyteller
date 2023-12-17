@@ -11,14 +11,21 @@ use async_openai::{
     Audio,
 };
 use futures::StreamExt;
-use std::io::Cursor;
+use serde::{Serialize, Serializer};
+use std::str;
 use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio::sync::mpsc;
 
 const MODEL: &str = "gpt-4";
 const MAX_TOKENS: u16 = 1024u16;
 
-pub async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow::Result<()> {
+#[derive(Serialize)]
+struct StoryChunk {
+    text: String,
+    audio: Base64,
+}
+
+pub async fn stream(prompt: String, stream_writer: DuplexStream) -> anyhow::Result<()> {
     let client = Client::new();
 
     let (token_tx, token_rx) = mpsc::channel(100);
@@ -26,7 +33,7 @@ pub async fn stream_audio(prompt: String, audio_writer: DuplexStream) -> anyhow:
     {
         let client = client.clone();
         tokio::spawn(async move {
-            if let Err(e) = synthesize_task(client, token_rx, audio_writer).await {
+            if let Err(e) = synthesize_task(client, token_rx, stream_writer).await {
                 log::error!("synthesize_task error: {}", e);
             }
         });
@@ -114,9 +121,8 @@ async fn query_gpt(
 async fn synthesize_task(
     client: Client<OpenAIConfig>,
     mut token_rx: mpsc::Receiver<String>,
-    mut audio_writer: DuplexStream,
+    mut stream_writer: DuplexStream,
 ) -> anyhow::Result<()> {
-    let mut wav_streamer = WavStreamer::new();
     let mut unspoken_text = String::new();
 
     while let Some(token) = token_rx.recv().await {
@@ -124,14 +130,18 @@ async fn synthesize_task(
         if let Some(i) = find_break(&unspoken_text) {
             let new_text = unspoken_text.split_off(i + 1);
             if let Some(data) = synthesize(&client, &unspoken_text).await? {
-                audio_writer.write_all(&wav_streamer.add(&data)).await?;
+                stream_writer
+                    .write_all(&encode_chunk(unspoken_text, data))
+                    .await?;
             }
             unspoken_text = new_text;
         }
     }
 
     if let Some(data) = synthesize(&client, &unspoken_text).await? {
-        audio_writer.write_all(&wav_streamer.add(&data)).await?;
+        stream_writer
+            .write_all(&encode_chunk(unspoken_text, data))
+            .await?;
     }
 
     Ok(())
@@ -158,71 +168,38 @@ async fn synthesize(client: &Client<OpenAIConfig>, text: &str) -> anyhow::Result
     let audio = Audio::new(client);
     let response = audio.speech(request).await?;
 
-    let flac_data: Vec<u8> = response.bytes.to_vec();
-    let wav_data = decode_flac(&flac_data)?;
+    let data: Vec<u8> = response.bytes.to_vec();
 
     log::trace!(
         "synthesize_speech took {}ms, {} bytes input, {} bytes output",
         start_time.elapsed().as_millis(),
         text.len(),
-        wav_data.len()
+        data.len()
     );
-    Ok(Some(wav_data))
+    Ok(Some(data))
 }
 
-fn decode_flac(flac_data: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let cursor = Cursor::new(&flac_data);
-    let mut reader = claxon::FlacReader::new(cursor)?;
-
-    let spec = hound::WavSpec {
-        channels: reader.streaminfo().channels as u16,
-        sample_rate: reader.streaminfo().sample_rate,
-        bits_per_sample: reader.streaminfo().bits_per_sample as u16,
-        sample_format: hound::SampleFormat::Int,
+fn encode_chunk(text: String, audio: Vec<u8>) -> Vec<u8> {
+    let chunk = StoryChunk {
+        text,
+        audio: Base64(audio),
     };
-
-    let mut wav_data = Vec::new();
-    {
-        let cursor = Cursor::new(&mut wav_data);
-        let mut wav_writer = hound::WavWriter::new(cursor, spec)?;
-
-        for opt_sample in reader.samples() {
-            let sample = opt_sample?;
-            wav_writer.write_sample(sample)?;
-        }
-    }
-
-    Ok(wav_data)
-}
-
-struct WavStreamer {
-    first: bool,
-}
-
-impl WavStreamer {
-    fn new() -> Self {
-        Self { first: true }
-    }
-
-    fn add(&mut self, data: &[u8]) -> Vec<u8> {
-        let first = self.first;
-        self.first = false;
-        let mut result = Vec::new();
-        if first {
-            result.extend_from_slice(&data[..]);
-            for i in 4..8 {
-                result[i] = 0xff;
-            }
-            for i in 40..44 {
-                result[i] = 0xff;
-            }
-        } else {
-            result.extend_from_slice(&data[44..]);
-        }
-        result
-    }
+    let mut data = serde_json::to_vec(&chunk).unwrap();
+    data.push(b'\n');
+    data
 }
 
 fn find_break(text: &str) -> Option<usize> {
     text.find('\n')
+}
+
+#[derive(Debug)]
+pub struct Base64(Vec<u8>);
+impl Serialize for Base64 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&base64::display::Base64Display::new(
+            &self.0,
+            &base64::engine::general_purpose::STANDARD,
+        ))
+    }
 }

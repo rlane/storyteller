@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 use tower_http::cors::{Any, CorsLayer};
 
-use storyteller::stream_audio;
+use storyteller::stream;
 
 #[tokio::main]
 async fn main() {
@@ -40,7 +40,7 @@ async fn main() {
         use axum::routing::get;
         Router::new()
             .route("/secret", get(index_get))
-            .route("/audio", get(audio_get))
+            .route("/stream", get(stream_get))
             .layer(cors)
             .layer(tower_http::trace::TraceLayer::new_for_http())
     };
@@ -56,17 +56,17 @@ async fn index_get() -> Html<&'static str> {
 }
 
 #[derive(Deserialize)]
-struct AudioQuery {
+struct StreamQuery {
     prompt: String,
 }
 
-async fn audio_get(query: Query<AudioQuery>) -> Result<impl IntoResponse, Error> {
+async fn stream_get(query: Query<StreamQuery>) -> Result<impl IntoResponse, Error> {
     let (writer, reader) = tokio::io::duplex(1024);
     let prompt = query.prompt.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = stream_audio(prompt, writer).await {
-            log::error!("stream_audio error: {}", e);
+        if let Err(e) = stream(prompt, writer).await {
+            log::error!("stream error: {}", e);
         }
     });
 
