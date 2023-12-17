@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 use tower_http::cors::{Any, CorsLayer};
 
-use storyteller::{credentials, stream_audio};
+use storyteller::stream_audio;
 
 #[tokio::main]
 async fn main() {
@@ -30,7 +30,6 @@ async fn main() {
     };
 
     log::info!("Starting Storyteller");
-    credentials().unwrap();
 
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])

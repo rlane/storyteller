@@ -1,18 +1,14 @@
-use clap::Parser;
-use google_cognitive_apis::api::grpc::google::cloud::texttospeech::v1::{
-    synthesis_input::InputSource, AudioConfig, AudioEncoding, SsmlVoiceGender, SynthesisInput,
-    SynthesizeSpeechRequest, VoiceSelectionParams,
+use async_openai::{
+    config::OpenAIConfig,
+    types::{CreateSpeechRequestArgs, SpeechModel, SpeechResponseFormat, Voice},
+    Audio, Client,
 };
-use google_cognitive_apis::texttospeech::synthesizer::Synthesizer;
-use std::env;
-use std::fs;
+use clap::Parser;
+use std::io::Cursor;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long)]
-    voice: String,
-
     #[arg(long)]
     text: String,
 
@@ -22,10 +18,12 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
     let args = Args::parse();
-    let mut synthesizer = Synthesizer::create(credentials()?).await.unwrap();
-    let language_code = &args.voice[..5];
-    let data = synthesize(&mut synthesizer, &args.text, language_code, &args.voice)
+    let client = Client::new();
+    let speech_model = SpeechModel::Tts1;
+    let voice = Voice::Nova;
+    let data = synthesize(&client, &args.text, speech_model, voice)
         .await
         .unwrap()
         .unwrap();
@@ -35,10 +33,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn synthesize(
-    synthesizer: &mut Synthesizer,
+    client: &Client<OpenAIConfig>,
     text: &str,
-    language_code: &str,
-    voice: &str,
+    speech_model: SpeechModel,
+    voice: Voice,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     let text = text.trim();
     if text.is_empty() {
@@ -47,39 +45,50 @@ async fn synthesize(
 
     log::trace!("Synthesizing {:?}", &text);
     let start_time = std::time::Instant::now();
-    let response = synthesizer
-        .synthesize_speech(SynthesizeSpeechRequest {
-            input: Some(SynthesisInput {
-                input_source: Some(InputSource::Text(text.to_owned())),
-            }),
-            voice: Some(VoiceSelectionParams {
-                language_code: language_code.to_owned(),
-                name: voice.to_owned(),
-                ssml_gender: SsmlVoiceGender::Female as i32,
-            }),
-            audio_config: Some(AudioConfig {
-                audio_encoding: AudioEncoding::Linear16 as i32,
-                speaking_rate: 1f64,
-                pitch: 0f64,
-                volume_gain_db: 0f64,
-                sample_rate_hertz: 24000,
-                effects_profile_id: vec![],
-            }),
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("synthesize_speech error: {:?}", e))?;
 
-    let data: Vec<u8> = response.audio_content;
+    let request = CreateSpeechRequestArgs::default()
+        .model(speech_model)
+        .voice(voice)
+        .input(text)
+        .response_format(SpeechResponseFormat::Flac)
+        .build()?;
+
+    let audio = Audio::new(&client);
+    let response = audio.speech(request).await?;
+
+    let flac_data: Vec<u8> = response.bytes.to_vec();
+    let wav_data = decode_flac(&flac_data)?;
+
     log::trace!(
         "synthesize_speech took {}ms, {} bytes input, {} bytes output",
         start_time.elapsed().as_millis(),
         text.len(),
-        data.len()
+        wav_data.len()
     );
-    Ok(Some(data))
+    Ok(Some(wav_data))
 }
 
-fn credentials() -> Result<String, anyhow::Error> {
-    let path = env::var("GOOGLE_APPLICATION_CREDENTIALS")?;
-    Ok(fs::read_to_string(path)?)
+fn decode_flac(flac_data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let cursor = Cursor::new(&flac_data);
+    let mut reader = claxon::FlacReader::new(cursor)?;
+
+    let spec = hound::WavSpec {
+        channels: reader.streaminfo().channels as u16,
+        sample_rate: reader.streaminfo().sample_rate,
+        bits_per_sample: reader.streaminfo().bits_per_sample as u16,
+        sample_format: hound::SampleFormat::Int,
+    };
+
+    let mut wav_data = Vec::new();
+    {
+        let cursor = Cursor::new(&mut wav_data);
+        let mut wav_writer = hound::WavWriter::new(cursor, spec)?;
+
+        for opt_sample in reader.samples() {
+            let sample = opt_sample?;
+            wav_writer.write_sample(sample)?;
+        }
+    }
+
+    Ok(wav_data)
 }

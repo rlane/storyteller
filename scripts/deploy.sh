@@ -17,5 +17,4 @@ gcloud --project $PROJECT_ID run deploy storyteller \
   --concurrency=10 \
   --max-instances=10 \
   --service-account=storyteller-service@$PROJECT_ID.iam.gserviceaccount.com \
-  --set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/secrets/google-credentials.json \
-  --update-secrets=/secrets/google-credentials.json=google-credentials:latest,OPENAI_API_KEY=openai_api_key:latest
+  --update-secrets=OPENAI_API_KEY=openai_api_key:latest

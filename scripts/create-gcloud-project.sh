@@ -21,14 +21,6 @@ gcloud services enable artifactregistry.googleapis.com run.googleapis.com textto
 gcloud iam service-accounts create storyteller-service
 gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:storyteller-service@${PROJECT_ID}.iam.gserviceaccount.com" --role='roles/secretmanager.secretAccessor'
 
-rm -rf .key
-mkdir .key
-chmod 0700 .key
-trap "rm -rf .key" EXIT
-gcloud iam service-accounts keys create .key/google-credentials.json --iam-account=storyteller-service@$PROJECT_ID.iam.gserviceaccount.com
-gcloud secrets create google-credentials --data-file .key/google-credentials.json
-rm -rf .key
-
 echo -n $OPENAI_API_KEY | gcloud secrets create openai_api_key --data-file=-
 
 while ! gcloud --project $PROJECT_ID artifacts repositories create services --repository-format=docker --location=$REGION; do

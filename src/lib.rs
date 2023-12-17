@@ -11,8 +11,6 @@ use async_openai::{
     Audio,
 };
 use futures::StreamExt;
-use std::env;
-use std::fs;
 use std::io::Cursor;
 use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio::sync::mpsc;
@@ -227,9 +225,4 @@ impl WavStreamer {
 
 fn find_break(text: &str) -> Option<usize> {
     text.find(['.', '?', '!', '\n'].as_ref())
-}
-
-pub fn credentials() -> Result<String, anyhow::Error> {
-    let path = env::var("GOOGLE_APPLICATION_CREDENTIALS")?;
-    Ok(fs::read_to_string(path)?)
 }
