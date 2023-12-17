@@ -13,19 +13,18 @@ use async_openai::{
 use futures::StreamExt;
 use serde::{Serialize, Serializer};
 use std::str;
-use tokio::io::{AsyncWriteExt, DuplexStream};
 use tokio::sync::mpsc;
 
 const MODEL: &str = "gpt-4";
 const MAX_TOKENS: u16 = 1024u16;
 
 #[derive(Serialize)]
-struct StoryChunk {
+pub struct StoryChunk {
     text: String,
     audio: Base64,
 }
 
-pub async fn stream(prompt: String, stream_writer: DuplexStream) -> anyhow::Result<()> {
+pub async fn stream(prompt: String, chunk_tx: mpsc::Sender<StoryChunk>) -> anyhow::Result<()> {
     let client = Client::new();
 
     let (token_tx, token_rx) = mpsc::channel(100);
@@ -33,7 +32,7 @@ pub async fn stream(prompt: String, stream_writer: DuplexStream) -> anyhow::Resu
     {
         let client = client.clone();
         tokio::spawn(async move {
-            if let Err(e) = synthesize_task(client, token_rx, stream_writer).await {
+            if let Err(e) = synthesize_task(client, token_rx, chunk_tx).await {
                 log::error!("synthesize_task error: {}", e);
             }
         });
@@ -121,7 +120,7 @@ async fn query_gpt(
 async fn synthesize_task(
     client: Client<OpenAIConfig>,
     mut token_rx: mpsc::Receiver<String>,
-    mut stream_writer: DuplexStream,
+    chunk_tx: mpsc::Sender<StoryChunk>,
 ) -> anyhow::Result<()> {
     let mut unspoken_text = String::new();
 
@@ -130,8 +129,11 @@ async fn synthesize_task(
         if let Some(i) = find_break(&unspoken_text) {
             let new_text = unspoken_text.split_off(i + 1);
             if let Some(data) = synthesize(&client, &unspoken_text).await? {
-                stream_writer
-                    .write_all(&encode_chunk(unspoken_text, data))
+                chunk_tx
+                    .send(StoryChunk {
+                        text: unspoken_text,
+                        audio: Base64(data),
+                    })
                     .await?;
             }
             unspoken_text = new_text;
@@ -139,8 +141,11 @@ async fn synthesize_task(
     }
 
     if let Some(data) = synthesize(&client, &unspoken_text).await? {
-        stream_writer
-            .write_all(&encode_chunk(unspoken_text, data))
+        chunk_tx
+            .send(StoryChunk {
+                text: unspoken_text,
+                audio: Base64(data),
+            })
             .await?;
     }
 
@@ -168,7 +173,7 @@ async fn synthesize(client: &Client<OpenAIConfig>, text: &str) -> anyhow::Result
     let audio = Audio::new(client);
     let response = audio.speech(request).await?;
 
-    let data: Vec<u8> = response.bytes.to_vec();
+    let data: Vec<u8> = response.bytes.into();
 
     log::trace!(
         "synthesize_speech took {}ms, {} bytes input, {} bytes output",
@@ -177,16 +182,6 @@ async fn synthesize(client: &Client<OpenAIConfig>, text: &str) -> anyhow::Result
         data.len()
     );
     Ok(Some(data))
-}
-
-fn encode_chunk(text: String, audio: Vec<u8>) -> Vec<u8> {
-    let chunk = StoryChunk {
-        text,
-        audio: Base64(audio),
-    };
-    let mut data = serde_json::to_vec(&chunk).unwrap();
-    data.push(b'\n');
-    data
 }
 
 fn find_break(text: &str) -> Option<usize> {

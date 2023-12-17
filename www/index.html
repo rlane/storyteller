@@ -30,11 +30,6 @@ button#start {
   color: #444444;
 }
 
-audio {
-  width: 100%;
-  visibility: hidden;
-}
-
 .shake {
   animation: shake 2.0s;
   animation-iteration-count: infinite;
@@ -66,9 +61,6 @@ audio {
 </form>
 <br />
 
-<audio id="audio" controls preload="none">
-  <source id="audio_source" type="audio/wav" />
-</audio>
 </div>
 
 <script>
@@ -78,33 +70,64 @@ async function start(event) {
   event.preventDefault();
   var prompt = document.getElementById("prompt").value;
   var button = document.getElementById("start");
-  var audio = document.getElementById("audio");
-  var audio_source = document.getElementById("audio_source");
-  var url = "/audio?prompt=" + encodeURIComponent(prompt);
-  audio_source.src = url;
-  audio.style.visibility = "hidden";
-  try {
-    document.getElementById("form").classList.add("shake");
-    start_time = new Date();
-    button.disabled = true;
-    audio.load();
-    await audio.play();
-  } catch (e) {
-    console.log(e);
+
+  document.getElementById("form").classList.add("shake");
+  start_time = new Date();
+  button.disabled = true;
+
+  var url = new URL(location.href);
+  if (url.protocol == 'http:') {
+    url.protocol = 'ws';
+  } else if (url.protocol == 'https:') {
+    url.protocol = 'wss';
   }
+  url.pathname = '/websocket';
+
+  var context = new AudioContext();
+  var last_source = null;
+
+  const ws = new WebSocket(url);
+  ws.onopen = (event) => {
+    ws.send(JSON.stringify({ "prompt": prompt }));
+  };
+  ws.onmessage = (event) => {
+    if (button.disabled) {
+      button.disabled = false;
+      document.getElementById("form").classList.remove("shake");
+      console.log("First data received in " + (new Date() - start_time) + "ms");
+    }
+    let data = JSON.parse(event.data);
+    console.log("Text: " + data.text);
+
+    let audio_buffer = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0)).buffer;
+
+    context.decodeAudioData(audio_buffer, (buffer) => {
+      console.log("Audio duration: " + buffer.duration);
+      let source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.onended = () => {
+        if (last_source == source) {
+          last_source = null;
+          console.log("Audio ended");
+        }
+      };
+      if (last_source == null) {
+        source.start(0);
+        console.log("Audio started");
+      } else {
+        last_source.onended = () => {
+          source.start(0.3);
+          console.log("Audio continued");
+        };
+      }
+      last_source = source;
+    });
+  };
 }
 
 const form = document.getElementById("form");
 form.addEventListener("submit", start);
-
-var audio = document.getElementById("audio");
-audio.addEventListener("canplaythrough", function() {
-  var button = document.getElementById("start");
-  button.disabled = false;
-  document.getElementById("form").classList.remove("shake");
-  audio.style.visibility = "visible";
-  console.log("Audio loaded in " + (new Date() - start_time) + "ms");
-});
 </script>
 
 </body>

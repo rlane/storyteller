@@ -1,13 +1,16 @@
 use axum::{
-    body::StreamBody,
-    extract::Query,
+    extract::{
+        ws::{Message, WebSocket},
+        WebSocketUpgrade,
+    },
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     Router,
 };
+use futures::StreamExt;
 use http::Method;
 use serde::Deserialize;
-use tokio_util::io::ReaderStream;
+use tokio::sync::mpsc;
 use tower_http::cors::{Any, CorsLayer};
 
 use storyteller::stream;
@@ -40,7 +43,7 @@ async fn main() {
         use axum::routing::get;
         Router::new()
             .route("/secret", get(index_get))
-            .route("/stream", get(stream_get))
+            .route("/websocket", get(websocket_handler))
             .layer(cors)
             .layer(tower_http::trace::TraceLayer::new_for_http())
     };
@@ -55,23 +58,54 @@ async fn index_get() -> Html<&'static str> {
     Html(include_str!("../../www/index.html"))
 }
 
+async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(|socket| websocket(socket))
+}
+
 #[derive(Deserialize)]
-struct StreamQuery {
+struct WebsocketRequest {
     prompt: String,
 }
 
-async fn stream_get(query: Query<StreamQuery>) -> Result<impl IntoResponse, Error> {
-    let (writer, reader) = tokio::io::duplex(1024);
-    let prompt = query.prompt.clone();
+async fn websocket(mut ws: WebSocket) {
+    while let Some(Ok(msg)) = ws.next().await {
+        if let Err(e) = handle_websocket_message(msg, &mut ws).await {
+            log::error!("websocket error: {}", e);
+            break;
+        }
+    }
+}
 
+async fn handle_websocket_message(msg: Message, sender: &mut WebSocket) -> anyhow::Result<()> {
+    let text = match msg {
+        Message::Text(request_json) => request_json,
+        _ => {
+            anyhow::bail!("Expected text message");
+        }
+    };
+
+    let request: WebsocketRequest = match serde_json::from_str(&text) {
+        Ok(r) => r,
+        Err(e) => {
+            anyhow::bail!("Error parsing request: {}", e);
+        }
+    };
+
+    let prompt = request.prompt;
+
+    let (tx, mut rx) = mpsc::channel(10);
     tokio::spawn(async move {
-        if let Err(e) = stream(prompt, writer).await {
+        if let Err(e) = stream(prompt, tx).await {
             log::error!("stream error: {}", e);
         }
     });
 
-    let body = StreamBody::new(ReaderStream::new(reader));
-    Ok((StatusCode::OK, body))
+    while let Some(chunk) = rx.recv().await {
+        let response_json = serde_json::to_string(&chunk)?;
+        sender.send(Message::Text(response_json)).await?;
+    }
+
+    Ok(())
 }
 
 pub fn error(status_code: StatusCode, msg: String) -> Error {
