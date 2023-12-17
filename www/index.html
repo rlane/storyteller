@@ -7,7 +7,7 @@ body {
 }
 
 div#main {
-  width: min(50em, 90%);
+  width: min(80em, 90%);
   margin: auto;
   position: absolute;
   top: 50%;
@@ -15,9 +15,10 @@ div#main {
   transform: translate(-50%, -50%);
 }
 
-input#prompt {
+textarea#prompt {
   display: block;
   width: 100%;
+  height: 3em;
   font-size: xxx-large;
   color: #444444;
 }
@@ -55,7 +56,7 @@ button#start {
 <div id="main">
 
 <form id="form">
-<input type="text" id="prompt" value="Tell me a story" />
+<textarea id="prompt">Tell me a story</textarea>
 <br />
 <button type="submit" id="start">Go</button>
 </form>
