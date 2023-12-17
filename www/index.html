@@ -10,7 +10,7 @@ div#main {
   width: min(80em, 90%);
   margin: auto;
   position: absolute;
-  top: 50%;
+  bottom: 10px;
   left: 50%;
   transform: translate(-50%, -50%);
 }
@@ -29,6 +29,15 @@ button#start {
   margin: auto;
   font-size: xxx-large;
   color: #444444;
+}
+
+div#text {
+  display: block;
+  font-size: xx-large;
+  color: #ffffff;
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 10px;
+  visibility: hidden;
 }
 
 .shake {
@@ -64,6 +73,8 @@ button#start {
 
 </div>
 
+<div id="text"></div>
+
 <script>
 var start_time = null;
 
@@ -71,6 +82,7 @@ async function start(event) {
   event.preventDefault();
   var prompt = document.getElementById("prompt").value;
   var button = document.getElementById("start");
+  var text_div = document.getElementById("text");
 
   document.getElementById("form").classList.add("shake");
   start_time = new Date();
@@ -116,10 +128,15 @@ async function start(event) {
       if (last_source == null) {
         source.start(0);
         console.log("Audio started");
+        text_div.innerText = data.text;
+        text_div.style.visibility = "visible";
       } else {
         last_source.onended = () => {
           source.start(0.3);
           console.log("Audio continued");
+          window.setTimeout(() => {
+            text_div.innerText = data.text;
+          }, 150);
         };
       }
       last_source = source;
