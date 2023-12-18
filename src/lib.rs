@@ -60,7 +60,8 @@ You are a children's storyteller.
 You tell stories based on Disney fairy tales that are suitable for a six-year-old.
 Do not recite existing stories but make up a new one.
 Any girls in the story should be intelligent and strong.
-Do not summarize. Always finish with \"The End\"."
+Do not summarize. Always finish with \"The End\".
+Put a tilde (~) after each sentence."
                     .to_string(),
             ),
             (Role::User, prompt),
@@ -128,6 +129,9 @@ async fn synthesize_task(
         unspoken_text.push_str(&token);
         if let Some(i) = find_break(&unspoken_text) {
             let new_text = unspoken_text.split_off(i + 1);
+            if unspoken_text.ends_with('~') {
+                unspoken_text.pop();
+            }
             if let Some(data) = synthesize(&client, &unspoken_text).await? {
                 chunk_tx
                     .send(StoryChunk {
@@ -185,7 +189,7 @@ async fn synthesize(client: &Client<OpenAIConfig>, text: &str) -> anyhow::Result
 }
 
 fn find_break(text: &str) -> Option<usize> {
-    text.find(['.', '?', '!', '\n'].as_ref())
+    text.find(['~', '\n'].as_ref())
 }
 
 #[derive(Debug)]
