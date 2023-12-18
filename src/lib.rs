@@ -185,7 +185,7 @@ async fn synthesize(client: &Client<OpenAIConfig>, text: &str) -> anyhow::Result
 }
 
 fn find_break(text: &str) -> Option<usize> {
-    text.find('\n')
+    text.find(['.', '?', '!', '\n'].as_ref())
 }
 
 #[derive(Debug)]
