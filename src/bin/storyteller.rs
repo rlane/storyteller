@@ -79,6 +79,9 @@ async fn websocket(mut ws: WebSocket) {
 async fn handle_websocket_message(msg: Message, sender: &mut WebSocket) -> anyhow::Result<()> {
     let text = match msg {
         Message::Text(request_json) => request_json,
+        Message::Close(_) => {
+            return Ok(());
+        }
         _ => {
             anyhow::bail!("Expected text message");
         }
